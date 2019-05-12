@@ -2,6 +2,7 @@ package goproxy
 
 import (
 	"bytes"
+	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -282,6 +283,31 @@ func (pcond *ProxyConds) Do(h RespHandler) {
 				}
 			}
 			return h.Handle(resp, ctx)
+		}))
+}
+
+func (pcond *ProxyConds) DoFuncOnCopy(f func(dst io.Writer, src io.ReadCloser, resp *http.Response, ctx *ProxyCtx) (io.Writer, io.ReadCloser)) {
+	pcond.DoOnCopy(FuncCopyHandler(f))
+}
+
+func (pcond *ProxyConds) DoOnCopy(h CopyHandler) {
+	pcond.proxy.copyHandlers = append(pcond.proxy.copyHandlers,
+		FuncCopyHandler(func(dst io.Writer, src io.ReadCloser, resp *http.Response, ctx *ProxyCtx) (io.Writer, io.ReadCloser) {
+			for _, cond := range pcond.reqConds {
+				if !cond.HandleReq(ctx.Req, ctx) {
+					return dst, src
+				}
+			}
+
+			if resp != nil {
+				for _, cond := range pcond.respCond {
+					if !cond.HandleResp(resp, ctx) {
+						return dst, src
+					}
+				}
+			}
+
+			return h.Handle(dst, src, resp, ctx)
 		}))
 }
 

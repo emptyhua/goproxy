@@ -13,7 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
+	// "sync"
 	"sync/atomic"
 )
 
@@ -108,7 +108,9 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 			go copyAndClose(ctx, targetTCP, proxyClientTCP)
 			go copyAndClose(ctx, proxyClientTCP, targetTCP)
 		} else {
-			go func() {
+			proxyClient.Close()
+			targetSiteCon.Close()
+			/* go func() {
 				var wg sync.WaitGroup
 				wg.Add(2)
 				go copyOrWarn(ctx, targetSiteCon, proxyClient, &wg)
@@ -116,8 +118,7 @@ func (proxy *ProxyHttpServer) handleHttps(w http.ResponseWriter, r *http.Request
 				wg.Wait()
 				proxyClient.Close()
 				targetSiteCon.Close()
-
-			}()
+			}() */
 		}
 
 	case ConnectHijack:
@@ -286,20 +287,38 @@ func httpError(w io.WriteCloser, ctx *ProxyCtx, err error) {
 	}
 }
 
+/*
 func copyOrWarn(ctx *ProxyCtx, dst io.Writer, src io.Reader, wg *sync.WaitGroup) {
 	if _, err := io.Copy(dst, src); err != nil {
 		ctx.Warnf("Error copying to client: %s", err)
 	}
 	wg.Done()
 }
+*/
+
+type tcpReadCloser struct {
+	*net.TCPConn
+}
+
+func (t *tcpReadCloser) Close() error {
+	return t.TCPConn.CloseRead()
+}
 
 func copyAndClose(ctx *ProxyCtx, dst, src *net.TCPConn) {
-	if _, err := io.Copy(dst, src); err != nil {
+	var dst2 io.Writer = dst
+	var src2 io.ReadCloser = &tcpReadCloser{src}
+
+	for _, h := range ctx.proxy.copyHandlers {
+		dst2, src2 = h.Handle(dst2, src2, nil, ctx)
+	}
+
+	if _, err := io.Copy(dst2, src2); err != nil {
 		ctx.Warnf("Error copying to client: %s", err)
 	}
 
+	src2.Close()
 	dst.CloseWrite()
-	src.CloseRead()
+	// src.CloseRead()
 }
 
 func dialerFromEnv(proxy *ProxyHttpServer) func(network, addr string) (net.Conn, error) {

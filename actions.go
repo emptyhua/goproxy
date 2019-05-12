@@ -1,6 +1,9 @@
 package goproxy
 
-import "net/http"
+import (
+	"io"
+	"net/http"
+)
 
 // ReqHandler will "tamper" with the request coming to the proxy server
 // If Handle returns req,nil the proxy will send the returned request
@@ -33,6 +36,16 @@ type FuncRespHandler func(resp *http.Response, ctx *ProxyCtx) *http.Response
 // FuncRespHandler.Handle(req,ctx) <=> FuncRespHandler(req,ctx)
 func (f FuncRespHandler) Handle(resp *http.Response, ctx *ProxyCtx) *http.Response {
 	return f(resp, ctx)
+}
+
+type CopyHandler interface {
+	Handle(dst io.Writer, src io.ReadCloser, resp *http.Response, ctx *ProxyCtx) (io.Writer, io.ReadCloser)
+}
+
+type FuncCopyHandler func(dst io.Writer, src io.ReadCloser, resp *http.Response, ctx *ProxyCtx) (io.Writer, io.ReadCloser)
+
+func (f FuncCopyHandler) Handle(dst io.Writer, src io.ReadCloser, resp *http.Response, ctx *ProxyCtx) (io.Writer, io.ReadCloser) {
+	return f(dst, src, resp, ctx)
 }
 
 // When a client send a CONNECT request to a host, the request is filtered through

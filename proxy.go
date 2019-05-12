@@ -25,6 +25,7 @@ type ProxyHttpServer struct {
 	reqHandlers     []ReqHandler
 	respHandlers    []RespHandler
 	httpsHandlers   []HttpsHandler
+	copyHandlers    []CopyHandler
 	Tr              *http.Transport
 	// ConnectDial will be used to create TCP connections for CONNECT requests
 	// if nil Tr.Dial will be used
@@ -67,6 +68,7 @@ func (proxy *ProxyHttpServer) filterRequest(r *http.Request, ctx *ProxyCtx) (req
 	}
 	return
 }
+
 func (proxy *ProxyHttpServer) filterResponse(respOrig *http.Response, ctx *ProxyCtx) (resp *http.Response) {
 	resp = respOrig
 	for _, h := range proxy.respHandlers {
@@ -141,8 +143,15 @@ func (proxy *ProxyHttpServer) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 		copyHeaders(w.Header(), resp.Header, proxy.KeepDestinationHeaders)
 		w.WriteHeader(resp.StatusCode)
-		nr, err := io.Copy(w, resp.Body)
-		if err := resp.Body.Close(); err != nil {
+
+		dst := w.(io.Writer)
+		src := resp.Body.(io.ReadCloser)
+		for _, h := range proxy.copyHandlers {
+			dst, src = h.Handle(dst, src, resp, ctx)
+		}
+
+		nr, err := io.Copy(dst, src)
+		if err := src.Close(); err != nil {
 			ctx.Warnf("Can't close response body %v", err)
 		}
 		ctx.Logf("Copied %v bytes to client error=%v", nr, err)
@@ -156,6 +165,7 @@ func NewProxyHttpServer() *ProxyHttpServer {
 		reqHandlers:   []ReqHandler{},
 		respHandlers:  []RespHandler{},
 		httpsHandlers: []HttpsHandler{},
+		copyHandlers:  []CopyHandler{},
 		NonproxyHandler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			http.Error(w, "This is a proxy server. Does not respond to non-proxy requests.", 500)
 		}),
